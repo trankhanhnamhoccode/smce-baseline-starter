@@ -20,7 +20,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from smce_baseline_core import setup_full_private_images  # noqa: E402
+from shared.data_utils import setup_full_private_images  # noqa: E402
 
 
 def main() -> None:

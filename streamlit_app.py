@@ -1,156 +1,360 @@
 #!/usr/bin/env python3
-"""Streamlit demo — SMCE baseline on private_test format."""
+"""Streamlit demo shell for URA Hackathon teams — customize team_config.py + solution/."""
 
 from __future__ import annotations
 
-import sys
-from pathlib import Path
+import io
 
-import pandas as pd
 import streamlit as st
 from PIL import Image
 
-from smce_baseline_core import (
-    build_product_predictor,
-    find_private_root,
-    load_private_catalog,
-    load_private_solution,
-    load_train_labels,
-    predict_private,
-    predict_public,
-    private_images_dir,
-    run_ocr_on_image,
+import team_config as cfg
+from solution import predict_from_image
+
+APP_CSS = f"""
+@import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap');
+
+:root {{
+    --ura-blue: {cfg.THEME_PRIMARY};
+    --ura-blue-dark: {cfg.THEME_PRIMARY_DARK};
+    --ura-bg: {cfg.THEME_BG};
+    --ura-text: {cfg.THEME_TEXT};
+    --ura-muted: {cfg.THEME_MUTED};
+}}
+
+html, body, .stApp {{
+    font-family: 'Montserrat', sans-serif !important;
+    font-size: 14px !important;
+    background-color: var(--ura-bg) !important;
+    color: var(--ura-text) !important;
+}}
+
+[data-testid="stSidebar"] {{ display: none; }}
+[data-testid="collapsedControl"] {{ display: none; }}
+
+[data-testid="stAppViewContainer"] > section > div {{
+    padding-top: 1rem;
+}}
+
+[data-testid="stImage"]:first-of-type {{
+    margin-bottom: 1rem;
+}}
+
+[data-testid="stImage"]:first-of-type img {{
+    max-height: 72px;
+    width: auto;
+}}
+
+.app-title,
+[data-testid="stMarkdownContainer"] p.app-title {{
+    display: block;
+    font-family: 'Montserrat', sans-serif !important;
+    font-size: 32px !important;
+    font-weight: 700 !important;
+    color: var(--ura-blue) !important;
+    margin: 0 0 0.5rem 0 !important;
+    line-height: 1.25 !important;
+}}
+
+.app-subtitle {{
+    display: block;
+    font-family: 'Montserrat', sans-serif !important;
+    font-size: 14px !important;
+    font-weight: 500 !important;
+    color: var(--ura-muted) !important;
+    margin: 0 0 0.75rem 0 !important;
+    line-height: 1.5 !important;
+    max-width: 100%;
+}}
+
+.app-team-info {{
+    margin: 0 0 1.25rem 0;
+    padding: 0;
+    list-style: none;
+}}
+
+.app-team-info li {{
+    font-family: 'Montserrat', sans-serif !important;
+    font-size: 14px !important;
+    line-height: 1.6 !important;
+    margin: 0 0 0.35rem 0 !important;
+    color: var(--ura-text) !important;
+}}
+
+.app-team-info li strong {{
+    color: var(--ura-blue);
+    font-weight: 600;
+}}
+
+.app-team-info a {{
+    color: var(--ura-blue);
+    text-decoration: none;
+    font-weight: 500;
+}}
+
+.app-team-info a:hover {{
+    text-decoration: underline;
+}}
+
+[data-testid="stMarkdownContainer"] h2,
+[data-testid="stMarkdownContainer"] h3,
+[data-testid="stMarkdownContainer"] h4 {{
+    font-family: 'Montserrat', sans-serif !important;
+    color: var(--ura-blue) !important;
+}}
+
+[data-testid="stMarkdownContainer"] p,
+[data-testid="stMarkdownContainer"] li,
+[data-testid="stCaptionContainer"] {{
+    font-family: 'Montserrat', sans-serif !important;
+    font-size: 14px !important;
+}}
+
+.stTabs [data-baseweb="tab-list"] button[aria-selected="true"] {{
+    color: var(--ura-blue) !important;
+    border-bottom-color: var(--ura-blue) !important;
+}}
+
+.stTabs [data-baseweb="tab-list"] button {{
+    font-family: 'Montserrat', sans-serif !important;
+    font-size: 14px !important;
+    font-weight: 600 !important;
+}}
+
+.stButton > button[kind="primary"],
+.stButton > button[data-testid="stBaseButton-primary"] {{
+    background-color: var(--ura-blue) !important;
+    border-color: var(--ura-blue) !important;
+    color: #FFFFFF !important;
+    font-family: 'Montserrat', sans-serif !important;
+    font-size: 14px !important;
+    font-weight: 600 !important;
+}}
+
+.stButton > button[kind="primary"]:hover,
+.stButton > button[data-testid="stBaseButton-primary"]:hover {{
+    background-color: var(--ura-blue-dark) !important;
+    border-color: var(--ura-blue-dark) !important;
+}}
+
+.stTextInput input,
+.stTextArea textarea,
+.stTextInput label,
+.stTextArea label {{
+    font-family: 'Montserrat', sans-serif !important;
+    font-size: 14px !important;
+}}
+
+[data-testid="stFileUploader"] label {{
+    font-family: 'Montserrat', sans-serif !important;
+    font-size: 14px !important;
+    font-weight: 600 !important;
+    color: var(--ura-text) !important;
+}}
+
+[data-testid="stFileUploader"] section[data-testid="stFileUploadDropzone"] {{
+    font-family: 'Montserrat', sans-serif !important;
+    font-size: 14px !important;
+}}
+
+[data-testid="stFileUploader"] section[data-testid="stFileUploadDropzone"] button {{
+    font-family: 'Montserrat', sans-serif !important;
+    font-size: 14px !important;
+}}
+"""
+
+st.set_page_config(
+    page_title=cfg.BROWSER_TITLE,
+    page_icon=str(cfg.FAVICON),
+    layout="wide",
+    initial_sidebar_state="collapsed",
 )
 
-st.set_page_config(page_title="SMCE Baseline Demo", page_icon="🛒", layout="wide")
+st.markdown(f"<style>{APP_CSS}</style>", unsafe_allow_html=True)
 
-st.title("SMCE Baseline — Private Test Demo")
-st.caption(
-    "EasyOCR (CPU) + brand rules + optional sklearn product head. "
-    "Dataset: `data/private_test/` (sample images included; run `scripts/setup_private_images.py` for full set)."
+st.image(str(cfg.LOGO), width=cfg.LOGO_WIDTH)
+
+st.markdown(
+    f'<p class="app-title">{cfg.PAGE_TITLE}</p>',
+    unsafe_allow_html=True,
+)
+st.markdown(
+    f'<p class="app-subtitle">{cfg.SUBTITLE}</p>',
+    unsafe_allow_html=True,
+)
+st.markdown(
+    f"""
+    <ul class="app-team-info">
+        <li><strong>Team Member:</strong> {cfg.TEAM_MEMBERS}</li>
+        <li><strong>Github Repo link:</strong> <a href="{cfg.GITHUB_REPO}" target="_blank">{cfg.GITHUB_REPO}</a></li>
+        <li><strong>Other resource link:</strong> <a href="{cfg.OTHER_RESOURCE}" target="_blank">{cfg.OTHER_RESOURCE}</a></li>
+    </ul>
+    """,
+    unsafe_allow_html=True,
 )
 
 
-@st.cache_resource(show_spinner="Loading EasyOCR (vi + en, CPU)...")
-def get_ocr_reader():
-    import easyocr
-
-    return easyocr.Reader(["vi", "en"], gpu=False, verbose=False)
-
-
-@st.cache_resource(show_spinner="Training lightweight product head...")
-def get_product_predictor():
-    labels = load_train_labels()
-    if labels is None:
-        return None
-    return build_product_predictor(labels)
+def _init_live_state() -> None:
+    for key in ("ocr_text_live", "brand_name_live", "product_name_live", "upload_file_id"):
+        if key not in st.session_state:
+            st.session_state[key] = "" if key != "upload_file_id" else None
 
 
-def _score_private(gt: pd.DataFrame, pred: pd.DataFrame) -> float | None:
-    metric_py = Path(__file__).resolve().parent / "private_test" / "metric.py"
-    if not metric_py.is_file():
-        return None
-    sys.path.insert(0, str(metric_py.parent))
-    try:
-        from metric import score  # noqa: WPS433
-
-        cols = ["image_id", "ocr_text", "brand_name", "product_name"]
-        return float(score(gt[cols], pred[cols], "image_id"))
-    except Exception as exc:
-        st.warning(f"Private score unavailable: {exc}")
-        return None
+def _load_uploaded_image(uploaded) -> Image.Image:
+    return Image.open(io.BytesIO(uploaded.getvalue())).convert("RGB")
 
 
-with st.sidebar:
-    st.header("Settings")
-    fmt = st.radio("Format", ["Private (4 columns)", "Public (3 columns)"], index=0)
-    private_mode = fmt.startswith("Private")
-    use_train_head = st.checkbox("Use train product head", value=True)
-    min_conf = st.slider("OCR min confidence", 0.1, 0.9, 0.35, 0.05)
-    priv_root = find_private_root()
-    if priv_root:
-        img_dir = private_images_dir(priv_root)
-        n_local = len(list(img_dir.glob("*.jpg")))
-        st.caption(f"Images: `{img_dir.name}/` ({n_local:,} jpg)")
+def _clear_live_results() -> None:
+    st.session_state["ocr_text_live"] = ""
+    st.session_state["brand_name_live"] = ""
+    st.session_state["product_name_live"] = ""
 
-predictor = get_product_predictor() if use_train_head else None
-product_fn = predictor.predict if predictor else None
 
-tab_upload, tab_private, tab_text = st.tabs(["Upload image", "Private catalog", "Text only"])
+def _render_about_tab() -> None:
+    st.header("About")
+    st.markdown(
+        """
+        Tab này dành cho **mỗi team** trình bày giải pháp OCR + trích xuất
+        **brand_name** và **product_name** cho cuộc thi. Hãy thay các placeholder
+        bên dưới bằng nội dung thật của team bạn (hoặc chỉnh trực tiếp trong
+        [`streamlit_app.py`](streamlit_app.py) hàm `_render_about_tab`).
+        """
+    )
 
-with tab_upload:
-    uploaded = st.file_uploader("Product image", type=["jpg", "jpeg", "png"])
-    image_id = st.text_input("image_id", value="demo_0001")
+    st.subheader("1. Thông tin team")
+    st.markdown(
+        f"""
+        | Trường | Nội dung |
+        |--------|----------|
+        | **Tên team** | {cfg.TEAM_NAME} |
+        | **Thành viên** | {cfg.TEAM_MEMBERS} |
+        | **GitHub** | [{cfg.GITHUB_REPO}]({cfg.GITHUB_REPO}) |
+        """
+    )
+
+    st.subheader("2. Bài toán")
+    st.markdown(
+        """
+        Từ **ảnh sản phẩm trên kệ hàng / social media**, hệ thống cần trích xuất:
+
+        - **`ocr_text`** — toàn bộ văn bản đọc được từ ảnh
+        - **`brand_name`** — tên thương hiệu
+        - **`product_name`** — tên / mô tả sản phẩm
+
+        **Điểm private round:**
+
+        `0.4 × F1_brand + 0.35 × (1 − CER) + 0.25 × F1_product`
+        """
+    )
+
+    st.subheader("3. Ý tưởng & pipeline giải pháp")
+    st.markdown(
+        """
+        > **Placeholder — mô tả pipeline của team**
+
+        1. **Tiền xử lý ảnh** — `[ví dụ: resize, tăng contrast, sharpen, …]`
+        2. **OCR** — `[ví dụ: EasyOCR vi+en, PaddleOCR, custom model, …]`
+        3. **Hậu xử lý OCR** — `[ví dụ: dedupe token, chuẩn hóa Unicode, …]`
+        4. **Trích xuất brand** — `[ví dụ: regex dictionary, NER, fuzzy match, …]`
+        5. **Trích xuất product** — `[ví dụ: rule-based, sklearn, LLM, …]`
+        6. **Hậu kiểm / ensemble** — `[nếu có]`
+        """
+    )
+
+    st.subheader("4. Điểm khác biệt & đóng góp chính")
+    st.markdown(
+        """
+        - `[Điểm mạnh 1]`
+        - `[Điểm mạnh 2]`
+        - `[Điểm mạnh 3]`
+        """
+    )
+
+    st.subheader("5. Công nghệ sử dụng")
+    st.markdown(
+        """
+        | Thành phần | Công nghệ (placeholder) |
+        |------------|-------------------------|
+        | OCR | `[EasyOCR / …]` |
+        | Brand extraction | `[Regex rules / …]` |
+        | Product extraction | `[Sklearn / …]` |
+        | Runtime | `[CPU / GPU, Python 3.11+]` |
+        | Demo UI | `Streamlit` |
+        """
+    )
+
+    st.subheader("6. Kết quả & đánh giá")
+    st.markdown(
+        """
+        | Metric | Giá trị (placeholder) |
+        |--------|------------------------|
+        | F1 brand (local) | `[—]` |
+        | 1 − CER (local) | `[—]` |
+        | F1 product (local) | `[—]` |
+        | **Private score** | `[—]` |
+        | Thời gian inference / ảnh | `[—]` |
+        """
+    )
+
+    st.subheader("7. Hạn chế & hướng phát triển")
+    st.markdown(
+        """
+        **Hạn chế hiện tại**
+        - `[ví dụ: brand mới chưa có trong từ điển]`
+
+        **Hướng phát triển**
+        - `[ví dụ: fine-tune OCR trên domain retail VN]`
+        """
+    )
+
+    st.subheader("8. Liên kết")
+    st.markdown(
+        f"""
+        - **Tài liệu setup:** [docs/TEAM_SETUP.md](docs/TEAM_SETUP.md)
+        - **Other resource:** [{cfg.OTHER_RESOURCE}]({cfg.OTHER_RESOURCE})
+        """
+    )
+
+
+tab_live, tab_about = st.tabs(["Live test", "About"])
+
+with tab_live:
+    _init_live_state()
+    st.subheader("Live test")
+
+    uploaded = st.file_uploader(
+        "Ảnh sản phẩm",
+        type=["jpg", "jpeg", "png"],
+        accept_multiple_files=False,
+        key="live_upload",
+    )
+
     if uploaded:
-        img = Image.open(uploaded)
-        c1, c2 = st.columns(2)
-        with c1:
+        file_id = f"{uploaded.name}:{uploaded.size}"
+        if st.session_state["upload_file_id"] != file_id:
+            st.session_state["upload_file_id"] = file_id
+            _clear_live_results()
+
+        img = _load_uploaded_image(uploaded)
+        col_img, col_result = st.columns(2)
+
+        with col_img:
             st.image(img, use_container_width=True)
-        if st.button("Run OCR", type="primary"):
-            ocr_text = run_ocr_on_image(img, get_ocr_reader(), min_conf)
-            st.session_state["ocr_text"] = ocr_text
-            if private_mode:
-                b, p = predict_private(ocr_text, product_fn)
-                st.session_state.update(brand_name=b, product_name=p)
-            else:
-                st.session_state["product_name"] = predict_public(ocr_text, product_fn)
-        with c2:
-            ocr_text = st.text_area("ocr_text", st.session_state.get("ocr_text", ""), height=140)
-            if private_mode:
-                st.text_input("brand_name", st.session_state.get("brand_name", ""))
-                st.text_input("product_name", st.session_state.get("product_name", ""))
-            else:
-                st.text_input("product_name", st.session_state.get("product_name", ""))
 
-with tab_private:
-    if priv_root is None:
-        st.warning(
-            "No `data/private_test/` found. Clone repo and ensure `private_test.csv` + `images_sample/` exist."
-        )
+        with col_result:
+            if st.button("Chạy OCR", type="primary", key="run_ocr_live"):
+                with st.spinner("Đang chạy OCR..."):
+                    pred = predict_from_image(img)
+                    st.session_state["ocr_text_live"] = pred["ocr_text"]
+                    st.session_state["brand_name_live"] = pred["brand_name"]
+                    st.session_state["product_name_live"] = pred["product_name"]
+
+            st.text_area("ocr_text", height=140, key="ocr_text_live")
+            st.text_input("brand_name", key="brand_name_live")
+            st.text_input("product_name", key="product_name_live")
     else:
-        catalog = load_private_catalog(priv_root)
-        solution = load_private_solution(priv_root)
-        images_dir = private_images_dir(priv_root)
-        available = {p.stem for p in images_dir.glob("*.jpg")}
-        st.caption(f"{len(catalog):,} IDs in CSV · {len(available):,} jpg on disk")
+        st.session_state["upload_file_id"] = None
+        _clear_live_results()
 
-        defaults = [i for i in ("priv_h_0006", "priv_d_0002", "priv_d_0003") if i in available]
-        selected = st.multiselect(
-            "image_id",
-            [i for i in catalog["image_id"] if i in available],
-            default=defaults or list(available)[:3],
-            max_selections=20,
-        )
-
-        if st.button("Run OCR", type="primary") and selected:
-            reader = get_ocr_reader()
-            rows = []
-            for iid in selected:
-                ocr_text = run_ocr_on_image(Image.open(images_dir / f"{iid}.jpg"), reader, min_conf)
-                brand, product = predict_private(ocr_text, product_fn)
-                rows.append(
-                    {
-                        "image_id": iid,
-                        "ocr_text": ocr_text,
-                        "brand_name": brand,
-                        "product_name": product,
-                    }
-                )
-            st.session_state["private_rows"] = rows
-
-        if "private_rows" in st.session_state:
-            pred_df = pd.DataFrame(st.session_state["private_rows"])
-            st.dataframe(pred_df, use_container_width=True)
-            if solution is not None:
-                gt = solution[solution["image_id"].isin(pred_df["image_id"])]
-                score = _score_private(gt, pred_df)
-                if score is not None:
-                    st.metric("Private score (subset)", f"{score:.4f}")
-
-with tab_text:
-    ocr_in = st.text_area("ocr_text", "Dove Smoothie tẩy da chết", height=100)
-    if private_mode:
-        b, p = predict_private(ocr_in, product_fn)
-        st.json({"ocr_text": ocr_in, "brand_name": b, "product_name": p})
-    else:
-        st.json({"ocr_text": ocr_in, "product_name": predict_public(ocr_in, product_fn)})
+with tab_about:
+    _render_about_tab()

@@ -1,52 +1,80 @@
 <div align="center">
 
-# 2nd URA Hackathon Baseline Starter
+# The 2nd URA Hackathon — Team Submission Template
 
-**CPU-friendly OCR + brand/product extraction for the SMCE private test (1,202 images)**
+**Fork-friendly starter: Streamlit demo + batch submission + baseline OCR pipeline**
 
 <p>
-  <img src="https://img.shields.io/badge/python-3.11+-blue" alt="Python 3.11+"/>
-  <img src="https://img.shields.io/badge/OCR-EasyOCR-orange" alt="EasyOCR"/>
-  <img src="https://img.shields.io/badge/UI-Streamlit-red" alt="Streamlit"/>
-  <img src="https://img.shields.io/badge/license-MIT-green" alt="MIT"/>
+  <img src="https://img.shields.io/badge/python-3.11+-blue?style=for-the-badge" alt="Python 3.11+"/>
+  <img src="https://img.shields.io/badge/Type-Team%20Template-7c3aed?style=for-the-badge" alt="Team Template"/>
+  <img src="https://img.shields.io/badge/UI-Streamlit-FF4B4B?style=for-the-badge&logo=streamlit&logoColor=white" alt="Streamlit"/>
+  <img src="https://img.shields.io/badge/license-MIT-green?style=for-the-badge" alt="MIT"/>
+</p>
+
+<p>
+  <img src="https://skillicons.dev/icons?i=python,github" alt="Python, GitHub"/>
 </p>
 
 </div>
 
 ## Overview
 
-Reference starter for **The 2nd URA Hackathon 2026** private round. Teams get:
+Template repository for **The 2nd URA Hackathon 2026** (SMCE private round). Teams **fork** this repo, customize branding, and **replace the code under `solution/`** with their own OCR + brand/product extraction pipeline.
 
-- `smce_baseline.ipynb` — end-to-end pipeline (OCR → `brand_name` + `product_name`)
-- **Streamlit** demo for quick iteration on single images
-- **`data/private_test/`** — IDs + sample images (full JPEG set installed separately)
-- **`private_test/metric.py`** — same scoring formula as Kaggle hidden round
+Included out of the box:
 
-**Private score:**
+- **Streamlit demo** — Live test (upload image) + About tab for team presentation
+- **Baseline pipeline** — EasyOCR + regex brands + optional sklearn product head
+- **Batch script** — `outputs/submission_private.csv` (Kaggle-ready)
+- **Sample data** — 6 private-test JPEGs + 1,202 IDs; full images installed separately
+- **Official metric** — [`private_test/metric.py`](private_test/metric.py) (read-only)
 
-`0.4 × F1_brand + 0.35 × (1 − CER) + 0.25 × F1_product`
+**Private score:** `0.4 × F1_brand + 0.35 × (1 − CER) + 0.25 × F1_product`
+
+## Fork in 3 steps
+
+1. **Fork** this repo → edit [`team_config.py`](team_config.py) (team name, members, links, logo).
+2. **Replace** [`solution/`](solution/) with your pipeline — keep `predict_from_image()` working.
+3. **Run** `streamlit run streamlit_app.py` and `python scripts/run_submission.py`.
+
+Full checklist: **[docs/TEAM_SETUP.md](docs/TEAM_SETUP.md)**
 
 ## Repository layout
 
-```
-smce-baseline-starter/
-├── smce_baseline.ipynb      # Main notebook
-├── streamlit_app.py         # Interactive demo
-├── smce_baseline_core.py    # OCR + predict helpers
-├── smce_brand_rules.py      # Regex brand dictionary (0 MB)
-├── smce_product_model.py    # Sklearn product head (~few MB)
+```text
+ura-hackathon-template/
+├── team_config.py           # ← Edit: branding & team info
+├── streamlit_app.py         # Demo UI (Live test + About)
+├── solution/                # ← Replace: your ML pipeline
+│   ├── pipeline.py          #   predict_from_image() entry point
+│   ├── brand_rules.py
+│   ├── product_model.py
+│   ├── baseline_notebook.ipynb
+│   └── README.md
+├── shared/                  # Data path helpers (keep)
+│   └── data_utils.py
+├── scripts/
+│   ├── setup_private_images.py
+│   └── run_submission.py
 ├── data/
-│   ├── train_labels.csv     # Weak labels for product head
+│   ├── train_labels.csv
 │   └── private_test/
-│       ├── private_test.csv
-│       ├── sample_submission_private.csv
-│       ├── images_sample/   # 6 demo images (in repo)
-│       └── images/          # Full set (gitignored, ~100 MB)
-├── private_test/metric.py   # Local scoring
-└── scripts/
-    ├── setup_private_images.py
-    └── run_private_baseline.py
+├── assets/                  # Logos & favicon
+├── outputs/                 # Generated submissions (gitignored)
+├── private_test/metric.py   # Official scoring — do not edit
+└── docs/
+    ├── TEAM_SETUP.md
+    └── SUBMISSION.md
 ```
+
+## What teams customize vs keep
+
+| Customize | Keep as-is |
+|-----------|------------|
+| `team_config.py` | `shared/`, `scripts/`, `data/` layout |
+| `solution/*.py` + notebook | `private_test/metric.py` |
+| `assets/` logos | `streamlit_app.py` structure (About text optional) |
+| About tab content | Submission column format |
 
 ## Quickstart
 
@@ -58,26 +86,16 @@ smce-baseline-starter/
 ### Install
 
 ```bash
-git clone https://github.com/YOUR_ORG/smce-baseline-starter.git
-cd smce-baseline-starter
+git clone https://github.com/YOUR_ORG/ura-hackathon-team-abc.git
+cd ura-hackathon-team-abc
 python -m venv .venv
-source .venv/bin/activate   # Windows: .venv\Scripts\activate
+source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### Full private images (recommended)
+### Configure team info
 
-The repo ships **6 sample JPEGs**. For the full **1,202** images:
-
-```bash
-python scripts/setup_private_images.py /path/to/private_test
-```
-
-If you have the hackathon monorepo checked out:
-
-```bash
-python scripts/setup_private_images.py ../private_test
-```
+Edit [`team_config.py`](team_config.py) — set `TEAM_NAME`, `TEAM_MEMBERS`, `GITHUB_REPO`, etc.
 
 ### Streamlit demo
 
@@ -85,78 +103,58 @@ python scripts/setup_private_images.py ../private_test
 streamlit run streamlit_app.py
 ```
 
-Tabs: upload image · pick from private catalog · text-only rule tuning.
-
-### Notebook
+### Batch submission
 
 ```bash
-jupyter notebook smce_baseline.ipynb
+python scripts/setup_private_images.py ../private_test   # optional: full 1,202 images
+python scripts/run_submission.py --limit 6                 # smoke test
+python scripts/run_submission.py                           # full CSV
 ```
 
-Run cells in order. Cell 9 is the **private live test** (same logic as Streamlit).
+Output: [`outputs/submission_private.csv`](outputs/submission_private.csv)
 
-### Batch submission (CLI)
+### Notebook (experiments)
 
 ```bash
-python scripts/run_private_baseline.py --limit 20   # smoke test on 20 jpg
-python scripts/run_private_baseline.py              # all images on disk
+jupyter notebook solution/baseline_notebook.ipynb
 ```
 
-Output: `submission_private.csv` (4 columns, Kaggle-ready placeholders).
+Port winning experiments into `solution/pipeline.py`.
 
-### Local scoring (optional)
-
-Copy `solution_private.csv` (BTC only) to `data/private_test/` — file is **gitignored**.
+## Solution API (contract)
 
 ```python
-import pandas as pd
-import sys
-sys.path.insert(0, "private_test")
-from metric import score
+from PIL import Image
+from solution import predict_from_image
 
-sol = pd.read_csv("data/private_test/solution_private.csv", keep_default_na=False)
-sub = pd.read_csv("submission_private.csv", keep_default_na=False)
-print(score(sol, sub, "image_id"))
+result = predict_from_image(Image.open("path/to.jpg"))
+# {"ocr_text": "...", "brand_name": "...", "product_name": "..."}
 ```
 
-## Submission format (private)
+See [`solution/README.md`](solution/README.md).
 
-| Column | Description |
-|--------|-------------|
-| `image_id` | `priv_h_*` or `priv_d_*` |
-| `ocr_text` | Raw OCR |
-| `brand_name` | Brand entity |
-| `product_name` | Product entity |
+## Useful docs
 
-Empty fields → single space `" "` in CSV.
+- [Team setup guide](docs/TEAM_SETUP.md)
+- [Submission format & local scoring](docs/SUBMISSION.md)
+- [Private test data](data/private_test/README.md)
 
-## Deploy Streamlit (Cloud)
+## Deploy Streamlit Cloud
 
-1. Push this repo to GitHub (public).
+1. Push your fork to GitHub (public).
 2. [share.streamlit.io](https://share.streamlit.io) → New app → `streamlit_app.py`.
-3. For full private catalog, attach images via your own storage or use **Upload** tab only.
 
-## Customize
-
-| Goal | Where |
-|------|--------|
-| Add brands | `smce_brand_rules.py` → `BRAND_RULES` |
-| Train product head | `data/train_labels.csv` + Cell 3b |
-| Swap OCR | Replace EasyOCR in notebook / `smce_baseline_core.py` |
-| Private metric weights | `private_test/metric.py` |
-
-## Status
+## Current status
 
 | Component | Status |
 |-----------|--------|
-| Private test IDs + sample images | Included |
+| Team template structure | Ready |
+| Streamlit demo (Live test + About) | Ready |
+| Baseline solution in `solution/` | Reference implementation |
+| Sample private images (6) | Included |
 | Full 1,202 images | Install via script |
-| Streamlit demo | Ready |
-| Notebook private cell | Ready |
-| Ground truth solution | Not public (BTC) |
+| Ground truth solution | BTC only — not public |
 
 ## License
 
 MIT — see [LICENSE](LICENSE).
-
-

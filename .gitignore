@@ -16,6 +16,8 @@ data/private_test/solution_private.csv
 solution_private.csv
 
 # Outputs
+outputs/*
+!outputs/.gitkeep
 submission_private.csv
 checkpoint_private.csv
 dataset_images/
