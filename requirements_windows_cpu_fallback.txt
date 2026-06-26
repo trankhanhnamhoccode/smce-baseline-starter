@@ -1,0 +1,14 @@
+﻿# Windows CPU fallback only.
+# Official Kaggle/Linux CPU demo should use requirements.txt.
+
+streamlit>=1.32,<1.59
+numpy==1.26.4
+pandas==2.2.3
+Pillow>=10,<13
+opencv-python-headless==4.10.0.84
+scikit-learn==1.6.1
+joblib>=1.3
+rapidfuzz>=3.6
+Unidecode>=1.3
+paddlepaddle==2.6.2
+paddleocr==2.7.3

@@ -24,3 +24,9 @@ outputs/*
 submission_private.csv
 checkpoint_private.csv
 dataset_images/
+
+# Local/Kaggle input model files, not committed to GitHub
+models/ocr_router/*.pkl
+
+# Local/Kaggle input model files, not committed to GitHub
+models/ocr_router/*.pkl
