@@ -624,3 +624,88 @@ def get_model_profile() -> dict[str, Any]:
         "extractor": "CleanRulebaseV3 + conservative product phrase + brand expander + curated evidence rules",
         "notes": "No SLM/LLM at inference. End-to-end from PIL image to OCR text, brand_name, product_name.",
     }
+
+# ============================================================
+# FINAL DEMO OVERRIDE: stable Kaggle CPU OCR, raw variant only
+# ============================================================
+
+from functools import lru_cache as _demo_lru_cache
+import os as _demo_os
+import numpy as _demo_np
+
+# Live demo default: one OCR pass per image.
+# Full 8-variant mode is too slow on CPU.
+VARIANTS = [
+    "raw",
+]
+
+FULL_VARIANTS = [
+    "raw",
+    "center_70_resize_960",
+    "bottom_60_resize_960",
+    "bottom_50_resize_960",
+    "bottom_45_resize_960",
+    "middle_bottom_70_resize_960",
+    "center_60_resize_960",
+    "upper_60_resize_960",
+]
+
+
+@_demo_lru_cache(maxsize=1)
+def get_ocr_reader():
+    """
+    Stable Kaggle CPU setup restored from the working CPU notebook.
+
+    Important details:
+    - PaddleOCR 3.x / PP-OCRv6
+    - CPU device
+    - engine="paddle"
+    - enable_mkldnn=False
+    - call predict(np.array(img)), not predict(path)
+    """
+    _demo_os.environ.setdefault("CUDA_VISIBLE_DEVICES", "")
+    _demo_os.environ.setdefault("FLAGS_use_cuda", "0")
+    _demo_os.environ.setdefault("FLAGS_use_mkldnn", "0")
+    _demo_os.environ.setdefault("FLAGS_use_onednn", "0")
+    _demo_os.environ.setdefault("FLAGS_enable_pir_api", "0")
+
+    try:
+        import paddle
+        paddle.set_device("cpu")
+    except Exception:
+        pass
+
+    from paddleocr import PaddleOCR
+
+    return PaddleOCR(
+        lang="vi",
+        device="cpu",
+        ocr_version="PP-OCRv6",
+        use_doc_orientation_classify=False,
+        use_doc_unwarping=False,
+        use_textline_orientation=False,
+        enable_mkldnn=False,
+        engine="paddle",
+    )
+
+
+def ocr_variant(img, variant_name, min_conf=DEFAULT_MIN_CONF):
+    """
+    Run one OCR variant using numpy input.
+
+    This matches the working CPU notebook behavior. In Kaggle CPU,
+    predict(path) may crash or become unstable, while predict(np.array(img))
+    works with engine="paddle" and enable_mkldnn=False.
+    """
+    vimg = make_variant(img, variant_name)
+    reader = get_ocr_reader()
+
+    arr = _demo_np.array(vimg.convert("RGB"))
+    result = reader.predict(arr)
+
+    return _parse_paddle_result(result, min_conf=min_conf)
+
+# ============================================================
+# END FINAL DEMO OVERRIDE
+# ============================================================
+
