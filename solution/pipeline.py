@@ -709,3 +709,49 @@ def ocr_variant(img, variant_name, min_conf=DEFAULT_MIN_CONF):
 # END FINAL DEMO OVERRIDE
 # ============================================================
 
+
+# ============================================================
+# FINAL OVERRIDE: auto-download OCR router models for Streamlit Cloud
+# ============================================================
+
+def _ensure_router_models_for_cloud():
+    try:
+        from scripts.download_models import ensure_router_models
+        ensure_router_models()
+    except Exception as e:
+        print(f"[models] Warning: could not auto-download router models: {e}")
+
+
+@lru_cache(maxsize=1)
+def load_router_model():
+    _ensure_router_models_for_cloud()
+
+    try:
+        import joblib
+        p = MODEL_DIR / "line_candidate_selector.pkl"
+        if p.exists():
+            return joblib.load(p)
+    except Exception as e:
+        print(f"[router] Failed to load line_candidate_selector.pkl: {e}")
+
+    return None
+
+
+@lru_cache(maxsize=1)
+def load_blank_model():
+    _ensure_router_models_for_cloud()
+
+    try:
+        import joblib
+        p = MODEL_DIR / "blank_classifier.pkl"
+        if p.exists():
+            return joblib.load(p)
+    except Exception as e:
+        print(f"[router] Failed to load blank_classifier.pkl: {e}")
+
+    return None
+
+# ============================================================
+# END FINAL OVERRIDE
+# ============================================================
+
