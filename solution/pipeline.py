@@ -58,6 +58,50 @@ REQUIRED_COLS = ["image_id", "ocr_text", "brand_name", "product_name"]
 VIET_CHARS = "a-zA-ZÀ-ỹĐđ"
 JUNK_TOKEN_RE = re.compile(rf"^[{VIET_CHARS}0-9]+$")
 
+_OCR_READER = None
+
+
+def get_ocr_reader():
+    """
+    Stable Streamlit/Kaggle CPU PaddleOCR singleton.
+
+    Important:
+    - Only initialize PaddleOCR once per Python process.
+    - Avoid PaddleX reinitialization error on Streamlit rerun/hot reload.
+    - Use predict(np.array(img)), not predict(path).
+    """
+    global _OCR_READER
+
+    if _OCR_READER is not None:
+        return _OCR_READER
+
+    os.environ.setdefault("CUDA_VISIBLE_DEVICES", "")
+    os.environ.setdefault("FLAGS_use_cuda", "0")
+    os.environ.setdefault("FLAGS_use_mkldnn", "0")
+    os.environ.setdefault("FLAGS_use_onednn", "0")
+    os.environ.setdefault("FLAGS_enable_pir_api", "0")
+    os.environ.setdefault("PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK", "True")
+
+    try:
+        import paddle
+        paddle.set_device("cpu")
+    except Exception:
+        pass
+
+    from paddleocr import PaddleOCR
+
+    _OCR_READER = PaddleOCR(
+        lang="vi",
+        device="cpu",
+        ocr_version="PP-OCRv6",
+        use_doc_orientation_classify=False,
+        use_doc_unwarping=False,
+        use_textline_orientation=False,
+        enable_mkldnn=False,
+        engine="paddle",
+    )
+
+    return _OCR_READER
 
 def is_junk_ocr_line(text: str, score: float | None = None) -> bool:
     s = str(text or "").strip()
@@ -180,42 +224,7 @@ def make_variant(img: Image.Image, variant: str) -> Image.Image:
     return light_enhance(resize_long_side(crop, 960))
 
 
-@lru_cache(maxsize=1)
-def get_ocr_reader():
-    """
-    Stable Kaggle CPU setup restored from the working CPU notebook.
 
-    Important details:
-    - PaddleOCR 3.x / PP-OCRv6
-    - CPU device
-    - engine="paddle"
-    - enable_mkldnn=False
-    - call predict(np.array(img)), not predict(path)
-    """
-    _demo_os.environ.setdefault("CUDA_VISIBLE_DEVICES", "")
-    _demo_os.environ.setdefault("FLAGS_use_cuda", "0")
-    _demo_os.environ.setdefault("FLAGS_use_mkldnn", "0")
-    _demo_os.environ.setdefault("FLAGS_use_onednn", "0")
-    _demo_os.environ.setdefault("FLAGS_enable_pir_api", "0")
-
-    try:
-        import paddle
-        paddle.set_device("cpu")
-    except Exception:
-        pass
-
-    from paddleocr import PaddleOCR
-
-    return PaddleOCR(
-        lang="vi",
-        device="cpu",
-        ocr_version="PP-OCRv6",
-        use_doc_orientation_classify=False,
-        use_doc_unwarping=False,
-        use_textline_orientation=False,
-        enable_mkldnn=False,
-        engine="paddle",
-    )
 
 
 def _parse_paddle_result(result: Any, min_conf: float) -> list[dict[str, Any]]:
@@ -1077,42 +1086,7 @@ VARIANTS = [
 ]
 
 
-@_demo_lru_cache(maxsize=1)
-def get_ocr_reader():
-    """
-    Stable Kaggle CPU setup restored from the working CPU notebook.
 
-    Important details:
-    - PaddleOCR 3.x / PP-OCRv6
-    - CPU device
-    - engine="paddle"
-    - enable_mkldnn=False
-    - call predict(np.array(img)), not predict(path)
-    """
-    _demo_os.environ.setdefault("CUDA_VISIBLE_DEVICES", "")
-    _demo_os.environ.setdefault("FLAGS_use_cuda", "0")
-    _demo_os.environ.setdefault("FLAGS_use_mkldnn", "0")
-    _demo_os.environ.setdefault("FLAGS_use_onednn", "0")
-    _demo_os.environ.setdefault("FLAGS_enable_pir_api", "0")
-
-    try:
-        import paddle
-        paddle.set_device("cpu")
-    except Exception:
-        pass
-
-    from paddleocr import PaddleOCR
-
-    return PaddleOCR(
-        lang="vi",
-        device="cpu",
-        ocr_version="PP-OCRv6",
-        use_doc_orientation_classify=False,
-        use_doc_unwarping=False,
-        use_textline_orientation=False,
-        enable_mkldnn=False,
-        engine="paddle",
-    )
 
 
 def ocr_variant(img, variant_name, min_conf=DEFAULT_MIN_CONF):
