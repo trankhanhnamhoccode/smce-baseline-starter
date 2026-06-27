@@ -2,7 +2,10 @@
 import urllib.request
 
 
-MODEL_DIR = Path("models/ocr_router")
+import os
+from pathlib import Path
+
+MODEL_DIR = Path(os.environ.get("SMCE_MODEL_DIR", "/tmp/smce_models/ocr_router"))
 
 MODEL_URLS = {
     "line_candidate_selector.pkl": "https://github.com/trankhanhnamhoccode/smce-baseline-starter/releases/download/ocr-router-v1/line_candidate_selector.pkl",
