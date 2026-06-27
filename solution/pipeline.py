@@ -39,6 +39,7 @@ PRODUCT_THRESHOLD = 6.3
 BRAND_THRESHOLD = 5.0
 BRAND_MARGIN = 0.5
 USE_BLANK_GATE = False  # Private route usually selected OCR candidate without applying blank gate.
+ENABLE_MERGE_CANDIDATES = False  # Live demo: keep False to avoid duplicated text from merged variants.
 
 VARIANTS = [
     "raw",
@@ -224,22 +225,40 @@ def _parse_paddle_result(result: Any, min_conf: float) -> list[dict[str, Any]]:
         text = _clean(text)
         if not text:
             return
+
         score_f = _safe_float(score, 1.0)
         if score_f < min_conf:
             return
         if is_junk_ocr_line(text, score_f):
             return
-        
+
         x0, y0 = 0.0, 0.0
+        box_w, box_h, box_area = 0.0, 0.0, 0.0
         try:
             pts = np.asarray(box, dtype=float)
             if pts.ndim >= 2 and pts.shape[-1] >= 2:
-                x0 = float(np.min(pts[..., 0]))
-                y0 = float(np.min(pts[..., 1]))
+                xs = pts[..., 0]
+                ys = pts[..., 1]
+                x0 = float(np.min(xs))
+                y0 = float(np.min(ys))
+                box_w = max(0.0, float(np.max(xs) - np.min(xs)))
+                box_h = max(0.0, float(np.max(ys) - np.min(ys)))
+                box_area = box_w * box_h
         except Exception:
             pass
 
-        items.append({"text": text, "score": score_f, "x": x0, "y": y0})
+        items.append(
+            {
+                "text": text,
+                "score": score_f,
+                "x": x0,
+                "y": y0,
+                "box_w": box_w,
+                "box_h": box_h,
+                "box_area": box_area,
+                "area_ratio": 0.0,
+            }
+        )
 
     def visit(x: Any):
         if x is None:
@@ -295,10 +314,6 @@ def _parse_paddle_result(result: Any, min_conf: float) -> list[dict[str, Any]]:
     return dedup
 
 
-
-
-
-
 def join_lines(lines: list[dict[str, Any]] | list[str]) -> str:
     texts: list[str] = []
     seen = set()
@@ -328,35 +343,198 @@ def junk_ratio(text: str) -> float:
     return max(0.0, min(1.0, 1.0 - good / max(1, len(text))))
 
 
-def candidate_row(name: str, ctype: str, source_variant: str, text: str, lines: list[dict[str, Any]], raw_stats: dict[str, float]) -> dict[str, Any]:
+ACCENT_RE_ROUTER = re.compile(
+    r"[àáạảãâầấậẩẫăằắặẳẵ"
+    r"èéẹẻẽêềếệểễ"
+    r"ìíịỉĩ"
+    r"òóọỏõôồốộổỗơờớợởỡ"
+    r"ùúụủũưừứựửữ"
+    r"ỳýỵỷỹđ"
+    r"ÀÁẠẢÃÂẦẤẬẨẪĂẰẮẶẲẴ"
+    r"ÈÉẸẺẼÊỀẾỆỂỄ"
+    r"ÌÍỊỈĨ"
+    r"ÒÓỌỎÕÔỒỐỘỔỖƠỜỚỢỞỠ"
+    r"ÙÚỤỦŨƯỪỨỰỬỮ"
+    r"ỲÝỴỶỸĐ]"
+)
+
+
+def _ratio(n: float, d: float) -> float:
+    return float(n / d) if d else 0.0
+
+
+def _line_area_ratio(x: dict[str, Any]) -> float:
+    return _safe_float(x.get("area_ratio"), 0.0) if isinstance(x, dict) else 0.0
+
+
+def text_feature_stats(text: str) -> dict[str, float]:
+    s = _clean(text)
+    char_count = len(s)
+    alpha_count = sum(ch.isalpha() for ch in s)
+    digit_count = sum(ch.isdigit() for ch in s)
+    upper_count = sum(ch.isupper() for ch in s)
+    accent_count = len(ACCENT_RE_ROUTER.findall(s))
+
+    return {
+        "is_blank": float(not bool(s)),
+        "char_count": float(char_count),
+        "digit_count": float(digit_count),
+        "alpha_count": float(alpha_count),
+        "upper_count": float(upper_count),
+        "accent_count": float(accent_count),
+        "digit_ratio": _ratio(digit_count, char_count),
+        "alpha_ratio": _ratio(alpha_count, char_count),
+        "upper_ratio": _ratio(upper_count, alpha_count),
+        "accent_ratio": _ratio(accent_count, alpha_count),
+        "has_digit": float(digit_count > 0),
+        "has_accent": float(accent_count > 0),
+        "has_dot": float("." in s),
+        "has_plus": float("+" in s),
+    }
+
+
+def candidate_row(
+    name: str,
+    ctype: str,
+    source_variant: str,
+    text: str,
+    lines: list[dict[str, Any]],
+    raw_stats: dict[str, float],
+) -> dict[str, Any]:
     scores = [_safe_float(x.get("score"), 0.0) for x in lines if isinstance(x, dict)]
+    areas = [_line_area_ratio(x) for x in lines if isinstance(x, dict) and _line_area_ratio(x) > 0]
+
     avg_score = float(np.mean(scores)) if scores else 0.0
     median_score = float(np.median(scores)) if scores else 0.0
+    avg_area_ratio = float(np.mean(areas)) if areas else 0.0
+
     n_lines = len([x for x in lines if _clean(x.get("text", "") if isinstance(x, dict) else x)])
     tl, wc = text_stats(text)
+    jr = junk_ratio(text)
+    feat = text_feature_stats(text)
+
     raw_tl = float(raw_stats.get("text_len", 0.0))
     raw_wc = float(raw_stats.get("word_count", 0.0))
+    raw_nl = float(raw_stats.get("num_lines", 0.0))
     raw_avg = float(raw_stats.get("avg_line_score", 0.0))
-    return {
+    raw_jr = float(raw_stats.get("junk_ratio", 0.0))
+    raw_digit_ratio = float(raw_stats.get("digit_ratio", 0.0))
+    raw_alpha_ratio = float(raw_stats.get("alpha_ratio", 0.0))
+
+    row = {
         "candidate_name": name,
         "candidate_type": ctype,
         "source_variant": source_variant,
         "ocr_text": text,
         "text": text,
         "final_ocr_text": text,
+
         "avg_line_score": avg_score,
         "median_line_score": median_score,
-        "num_lines": n_lines,
-        "text_len": tl,
-        "word_count": wc,
+        "num_lines": float(n_lines),
+        "avg_area_ratio": avg_area_ratio,
+
+        "text_len": float(tl),
+        "word_count": float(wc),
+        "junk_ratio": jr,
+
         "line_score_x_num_lines": avg_score * n_lines,
+        "area_x_num_lines": avg_area_ratio * n_lines,
+
         "raw_text_len": raw_tl,
         "raw_word_count": raw_wc,
+        "raw_num_lines": raw_nl,
         "raw_avg_line_score": raw_avg,
+        "raw_junk_ratio": raw_jr,
+        "raw_digit_ratio": raw_digit_ratio,
+        "raw_alpha_ratio": raw_alpha_ratio,
+
         "rel_text_len_vs_raw": tl / max(1.0, raw_tl),
         "rel_word_count_vs_raw": wc / max(1.0, raw_wc),
-        "junk_ratio": junk_ratio(text),
+        "rel_num_lines_vs_raw": n_lines / max(1.0, raw_nl),
+
+        "delta_score_vs_raw": avg_score - raw_avg,
+        "delta_junk_vs_raw": jr - raw_jr,
     }
+    row.update(feat)
+    return row
+
+
+def _has_accent_text(text: str) -> bool:
+    return bool(ACCENT_RE_ROUTER.search(_clean(text)))
+
+
+def _candidate_from_policy(
+    candidates: list[dict[str, Any]],
+    variant: str,
+    policy: str,
+    lines: list[dict[str, Any]],
+    raw_stats: dict[str, float],
+    *,
+    ctype: str = "single_variant_line_policy",
+    source_variant: str | None = None,
+) -> None:
+    if not lines:
+        return
+    text = join_lines(lines)
+    if not text:
+        return
+    source = source_variant or variant
+    candidates.append(
+        candidate_row(
+            f"line::{variant}::{policy}",
+            ctype,
+            source,
+            text,
+            lines,
+            raw_stats,
+        )
+    )
+
+
+def _generate_line_policy_candidates(
+    candidates: list[dict[str, Any]],
+    variant: str,
+    lines: list[dict[str, Any]],
+    raw_stats: dict[str, float],
+) -> None:
+    # Candidate names/types are aligned with the final notebook line-candidate router.
+    _candidate_from_policy(candidates, variant, "all_clean", lines, raw_stats)
+
+    score_ge_07 = [x for x in lines if _safe_float(x.get("score"), 0.0) >= 0.70]
+    _candidate_from_policy(candidates, variant, "score_ge_07", score_ge_07, raw_stats)
+
+    score_ge_085 = [x for x in lines if _safe_float(x.get("score"), 0.0) >= 0.85]
+    _candidate_from_policy(candidates, variant, "score_ge_085", score_ge_085, raw_stats)
+
+    with_accent = [x for x in lines if _has_accent_text(str(x.get("text", "")))]
+    _candidate_from_policy(candidates, variant, "with_accent", with_accent, raw_stats)
+
+    long_lines = [x for x in lines if len(_clean(x.get("text", ""))) >= 8]
+    _candidate_from_policy(candidates, variant, "long_lines", long_lines, raw_stats)
+
+    if len(lines) >= 2:
+        by_area = sorted(lines, key=lambda x: _line_area_ratio(x), reverse=True)
+        _candidate_from_policy(candidates, variant, "top5_area", by_area[:5], raw_stats)
+
+        area_vals = [_line_area_ratio(x) for x in lines]
+        if any(v > 0 for v in area_vals):
+            q50 = float(np.quantile(area_vals, 0.50))
+            q65 = float(np.quantile(area_vals, 0.65))
+            _candidate_from_policy(
+                candidates,
+                variant,
+                "area_ge_q50",
+                [x for x in lines if _line_area_ratio(x) >= q50],
+                raw_stats,
+            )
+            _candidate_from_policy(
+                candidates,
+                variant,
+                "area_ge_q65",
+                [x for x in lines if _line_area_ratio(x) >= q65],
+                raw_stats,
+            )
 
 
 def run_multivariant_ocr(img: Image.Image, min_conf: float = DEFAULT_MIN_CONF) -> tuple[str, list[str], pd.DataFrame, pd.DataFrame]:
@@ -366,89 +544,160 @@ def run_multivariant_ocr(img: Image.Image, min_conf: float = DEFAULT_MIN_CONF) -
     for variant in VARIANTS:
         try:
             lines = ocr_variant(img, variant, min_conf=min_conf)
-        except Exception:
+        except Exception as e:
+            print(f"[ocr] variant failed: {variant}: {e}", flush=True)
             lines = []
+
         variant_lines[variant] = lines
         text = join_lines(lines)
         scores = [_safe_float(x.get("score"), 0.0) for x in lines]
+        areas = [_line_area_ratio(x) for x in lines if _line_area_ratio(x) > 0]
+
         avg_score = float(np.mean(scores)) if scores else 0.0
         median_score = float(np.median(scores)) if scores else 0.0
+        avg_area_ratio = float(np.mean(areas)) if areas else 0.0
         tl, wc = text_stats(text)
-        variant_rows.append({
-            "source_variant": variant,
-            "ocr_text": text,
-            "text": text,
-            "avg_line_score": avg_score,
-            "median_line_score": median_score,
-            "num_lines": len(lines),
-            "text_len": tl,
-            "word_count": wc,
-            "junk_ratio": junk_ratio(text),
-        })
+
+        variant_rows.append(
+            {
+                "source_variant": variant,
+                "ocr_text": text,
+                "text": text,
+                "avg_line_score": avg_score,
+                "median_line_score": median_score,
+                "avg_area_ratio": avg_area_ratio,
+                "num_lines": len(lines),
+                "text_len": tl,
+                "word_count": wc,
+                "junk_ratio": junk_ratio(text),
+                **text_feature_stats(text),
+            }
+        )
 
     raw_row = next((r for r in variant_rows if r["source_variant"] == "raw"), None) or {}
     raw_stats = {
         "text_len": raw_row.get("text_len", 0),
         "word_count": raw_row.get("word_count", 0),
+        "num_lines": raw_row.get("num_lines", 0),
         "avg_line_score": raw_row.get("avg_line_score", 0),
+        "junk_ratio": raw_row.get("junk_ratio", 0),
+        "digit_ratio": raw_row.get("digit_ratio", 0),
+        "alpha_ratio": raw_row.get("alpha_ratio", 0),
     }
 
     candidates: list[dict[str, Any]] = []
+
     for r in variant_rows:
         v = r["source_variant"]
         text = r["ocr_text"]
-        candidates.append(candidate_row(f"single::{v}", "single", v, text, variant_lines[v], raw_stats))
+        lines = variant_lines[v]
 
-        high = [x for x in variant_lines[v] if _safe_float(x.get("score"), 0.0) >= 0.80]
-        if high:
-            candidates.append(candidate_row(f"score_ge_08::{v}", "line_policy", v, join_lines(high), high, raw_stats))
+        # Existing full-variant candidate from notebook final schema.
+        candidates.append(candidate_row(f"variant::{v}", "existing_variant", v, text, lines, raw_stats))
 
-        # Top-area proxy after sorting by y: first half of detected lines.
-        if len(variant_lines[v]) >= 2:
-            top = variant_lines[v][: max(1, len(variant_lines[v]) // 2)]
-            candidates.append(candidate_row(f"top_half::{v}", "line_policy", v, join_lines(top), top, raw_stats))
+        # Rich line-policy candidates from notebook final schema.
+        _generate_line_policy_candidates(candidates, v, lines, raw_stats)
 
-    merge_sets = [
-        ["raw", "bottom_50_resize_960"],
-        ["raw", "bottom_60_resize_960"],
-        ["raw", "center_70_resize_960"],
-        ["raw", "middle_bottom_70_resize_960"],
-        ["center_70_resize_960", "bottom_50_resize_960"],
-        ["upper_60_resize_960", "bottom_50_resize_960"],
-    ]
-    for vs in merge_sets:
-        lines: list[dict[str, Any]] = []
-        for v in vs:
-            lines.extend(variant_lines.get(v, []))
-        text = join_lines(lines)
-        name = "merge::" + "+".join(vs)
-        candidates.append(candidate_row(name, "merged", "+".join(vs), text, lines, raw_stats))
+    # Merge candidates are useful offline but caused duplicated live-demo text in several Streamlit cases.
+    # Keep disabled by default; set ENABLE_MERGE_CANDIDATES=True if you want to reproduce merge policies.
+    if ENABLE_MERGE_CANDIDATES:
+        merge_sets = [
+            ["raw", "bottom_50_resize_960"],
+            ["raw", "bottom_60_resize_960"],
+            ["raw", "center_70_resize_960"],
+            ["raw", "middle_bottom_70_resize_960"],
+            ["center_70_resize_960", "bottom_50_resize_960"],
+            ["upper_60_resize_960", "bottom_50_resize_960"],
+        ]
+        for vs in merge_sets:
+            lines: list[dict[str, Any]] = []
+            for v in vs:
+                lines.extend(variant_lines.get(v, []))
+
+            score_ge_085 = [x for x in lines if _safe_float(x.get("score"), 0.0) >= 0.85]
+            if not score_ge_085:
+                continue
+
+            source = "+".join(vs)
+            name_variant = source
+            text = join_lines(score_ge_085)
+            candidates.append(
+                candidate_row(
+                    f"merge::{source}::score_ge_085",
+                    "merged_line_policy",
+                    name_variant,
+                    text,
+                    score_ge_085,
+                    raw_stats,
+                )
+            )
 
     cand_df = pd.DataFrame(candidates).fillna("")
     var_df = pd.DataFrame(variant_rows).fillna("")
+
+    print(
+        "[ocr] candidates:",
+        len(cand_df),
+        "types:",
+        cand_df["candidate_type"].value_counts().to_dict() if "candidate_type" in cand_df.columns else {},
+        flush=True,
+    )
 
     selected_text = select_ocr_candidate(cand_df, var_df)
     evidence_lines = [selected_text] + [str(r["ocr_text"]) for r in variant_rows if _clean(r.get("ocr_text", ""))]
     return selected_text, evidence_lines, cand_df, var_df
 
 
-@lru_cache(maxsize=1)
-def _find_predictor_in_obj(obj):
-    """Return the first object that has .predict(), including inside dict bundles."""
+ROUTER_KNOWN_NUMERIC_COLS = [
+    "num_lines",
+    "avg_line_score",
+    "median_line_score",
+    "avg_area_ratio",
+    "text_len",
+    "word_count",
+    "char_count",
+    "digit_count",
+    "alpha_count",
+    "upper_count",
+    "accent_count",
+    "digit_ratio",
+    "alpha_ratio",
+    "upper_ratio",
+    "accent_ratio",
+    "junk_ratio",
+    "is_blank",
+    "has_digit",
+    "has_accent",
+    "has_dot",
+    "has_plus",
+    "line_score_x_num_lines",
+    "area_x_num_lines",
+    "raw_text_len",
+    "raw_word_count",
+    "raw_num_lines",
+    "raw_avg_line_score",
+    "raw_digit_ratio",
+    "raw_alpha_ratio",
+    "raw_junk_ratio",
+    "rel_text_len_vs_raw",
+    "rel_word_count_vs_raw",
+    "rel_num_lines_vs_raw",
+    "delta_score_vs_raw",
+    "delta_junk_vs_raw",
+]
+
+
+def _bundle_get_predictor(obj: Any) -> Any:
     if hasattr(obj, "predict"):
         return obj
 
     if isinstance(obj, dict):
-        print("[router] bundle keys:", list(obj.keys()), flush=True)
-
-        # Common keys first
         for key in ["model", "router", "estimator", "selector", "regressor", "clf", "pipeline"]:
             val = obj.get(key)
             if hasattr(val, "predict"):
                 print(f"[router] using bundle['{key}']", flush=True)
                 return val
 
-        # Fallback: scan all values
         for key, val in obj.items():
             if hasattr(val, "predict"):
                 print(f"[router] using bundle['{key}']", flush=True)
@@ -457,41 +706,80 @@ def _find_predictor_in_obj(obj):
     return None
 
 
-@lru_cache(maxsize=1)
-def load_router_model():
-    _ensure_router_models_for_cloud()
+def _bundle_feature_columns(bundle: Any, model: Any) -> tuple[list[str], list[str], list[str]]:
+    cat_cols: list[str] = []
+    num_cols: list[str] = []
+    feature_cols: list[str] = []
 
-    try:
-        import joblib
+    if isinstance(bundle, dict):
+        raw_cat = bundle.get("cat_cols") or bundle.get("categorical_cols") or bundle.get("category_cols")
+        raw_num = bundle.get("num_cols") or bundle.get("numeric_cols") or bundle.get("numeric_features")
+        raw_feat = bundle.get("feature_cols") or bundle.get("features") or bundle.get("input_cols") or bundle.get("columns")
 
-        p = MODEL_DIR / "line_candidate_selector.pkl"
-        print(f"[router] loading: {p} exists={p.exists()}", flush=True)
+        if raw_cat is not None:
+            cat_cols = [str(c) for c in list(raw_cat)]
+        if raw_num is not None:
+            num_cols = [str(c) for c in list(raw_num)]
+        if raw_feat is not None:
+            feature_cols = [str(c) for c in list(raw_feat)]
 
-        if not p.exists():
-            return None
+    if not cat_cols:
+        cat_cols = ["candidate_name", "candidate_type", "source_variant"]
 
-        obj = joblib.load(p)
-        predictor = _find_predictor_in_obj(obj)
+    if not num_cols:
+        # The released final notebook router expects these numeric features.
+        num_cols = ROUTER_KNOWN_NUMERIC_COLS.copy()
 
-        if predictor is None:
-            print("[router] no predictor found in loaded object:", type(obj), flush=True)
-            return None
+    if not feature_cols:
+        if hasattr(model, "feature_names_in_"):
+            try:
+                feature_cols = [str(c) for c in list(model.feature_names_in_)]
+            except Exception:
+                feature_cols = []
+        if not feature_cols:
+            feature_cols = cat_cols + num_cols
 
-        print("[router] loaded predictor:", type(predictor), flush=True)
-        return predictor
+    # Preserve order and deduplicate.
+    def dedup(xs: list[str]) -> list[str]:
+        out = []
+        seen = set()
+        for x in xs:
+            if x not in seen:
+                seen.add(x)
+                out.append(x)
+        return out
 
-    except Exception as e:
-        print(f"[router] Failed to load line_candidate_selector.pkl: {e}", flush=True)
-
-    return None
+    return dedup(cat_cols), dedup(num_cols), dedup(feature_cols)
 
 
-@lru_cache(maxsize=1)
-def load_blank_model():
-    p = ROOT / "models" / "ocr_router" / "blank_classifier.pkl"
-    if not p.exists():
-        return None
-    return joblib.load(p)
+def _prepare_router_frame(cand_df: pd.DataFrame, bundle: Any, model: Any) -> pd.DataFrame:
+    out = cand_df.copy()
+
+    cat_cols, num_cols, feature_cols = _bundle_feature_columns(bundle, model)
+
+    # Categorical columns used by the final notebook ColumnTransformer.
+    for col in cat_cols:
+        if col not in out.columns:
+            out[col] = ""
+        out[col] = out[col].fillna("").astype(str)
+
+    # Ensure all known/required numeric columns exist and are numeric.
+    required_numeric = list(dict.fromkeys(num_cols + ROUTER_KNOWN_NUMERIC_COLS))
+    for col in required_numeric:
+        if col not in out.columns:
+            out[col] = 0.0
+        out[col] = pd.to_numeric(out[col], errors="coerce").replace([np.inf, -np.inf], 0).fillna(0.0)
+
+    # If the bundle/model exposes feature columns, make sure every one exists.
+    for col in feature_cols:
+        if col not in out.columns:
+            out[col] = "" if col in cat_cols else 0.0
+        if col in cat_cols:
+            out[col] = out[col].fillna("").astype(str)
+        else:
+            out[col] = pd.to_numeric(out[col], errors="coerce").replace([np.inf, -np.inf], 0).fillna(0.0)
+
+    return out
 
 
 def select_ocr_candidate(cand_df: pd.DataFrame, var_df: pd.DataFrame) -> str:
@@ -511,14 +799,21 @@ def select_ocr_candidate(cand_df: pd.DataFrame, var_df: pd.DataFrame) -> str:
         flush=True,
     )
 
-    model = load_router_model()
+    bundle = load_router_bundle()
+    model = _bundle_get_predictor(bundle)
     print("[router] model loaded:", model is not None, "type:", type(model), flush=True)
 
-    scored = cand_df.copy()
+    selected = ""
 
     if model is not None:
         try:
-            scored["pred_btc_cer"] = model.predict(scored)
+            scored = _prepare_router_frame(cand_df, bundle, model)
+            cat_cols, num_cols, feature_cols = _bundle_feature_columns(bundle, model)
+
+            # Use only the columns the training bundle/model expects when available.
+            X = scored[feature_cols] if feature_cols else scored
+            scored["pred_btc_cer"] = model.predict(X)
+
             scored = scored.sort_values(
                 ["pred_btc_cer", "junk_ratio", "text_len"],
                 ascending=[True, True, False],
@@ -544,7 +839,6 @@ def select_ocr_candidate(cand_df: pd.DataFrame, var_df: pd.DataFrame) -> str:
             selected = ""
     else:
         print("[router] no model, using fallback rank_score", flush=True)
-        selected = ""
 
     if not selected:
         fallback = cand_df.copy()
@@ -552,6 +846,7 @@ def select_ocr_candidate(cand_df: pd.DataFrame, var_df: pd.DataFrame) -> str:
             fallback["avg_line_score"].astype(float).fillna(0) * 4.0
             + np.minimum(fallback["word_count"].astype(float).fillna(0), 40) / 10.0
             - fallback["junk_ratio"].astype(float).fillna(0) * 3.0
+            - (fallback["candidate_type"].astype(str).eq("merged_line_policy").astype(float) * 2.0)
         )
         fallback = fallback.sort_values(["rank_score", "text_len"], ascending=[False, False])
 
@@ -834,7 +1129,17 @@ def ocr_variant(img, variant_name, min_conf=DEFAULT_MIN_CONF):
     arr = _demo_np.array(vimg.convert("RGB"))
     result = reader.predict(arr)
 
-    return _parse_paddle_result(result, min_conf=min_conf)
+    lines = _parse_paddle_result(result, min_conf=min_conf)
+
+    # Normalize bbox area by variant image area so avg_area_ratio matches the final router schema.
+    img_area = float(max(1, arr.shape[0] * arr.shape[1]))
+    for line in lines:
+        try:
+            line["area_ratio"] = _safe_float(line.get("box_area"), 0.0) / img_area
+        except Exception:
+            line["area_ratio"] = 0.0
+
+    return lines
 
 # ============================================================
 # END FINAL DEMO OVERRIDE
@@ -853,57 +1158,36 @@ def _ensure_router_models_for_cloud():
         print(f"[models] Warning: could not auto-download router models: {e}")
 
 
-def _find_predictor_in_obj(obj):
-    """Return the first object that has .predict(), including inside dict bundles."""
-    if hasattr(obj, "predict"):
-        return obj
-
-    if isinstance(obj, dict):
-        print("[router] bundle keys:", list(obj.keys()), flush=True)
-
-        # Common keys first
-        for key in ["model", "router", "estimator", "selector", "regressor", "clf", "pipeline"]:
-            val = obj.get(key)
-            if hasattr(val, "predict"):
-                print(f"[router] using bundle['{key}']", flush=True)
-                return val
-
-        # Fallback: scan all values
-        for key, val in obj.items():
-            if hasattr(val, "predict"):
-                print(f"[router] using bundle['{key}']", flush=True)
-                return val
-
-    return None
-
-
 @lru_cache(maxsize=1)
-def load_router_model():
+def load_router_bundle():
     _ensure_router_models_for_cloud()
 
     try:
         import joblib
 
         p = MODEL_DIR / "line_candidate_selector.pkl"
-        print(f"[router] loading: {p} exists={p.exists()}", flush=True)
+        print(f"[router] loading bundle: {p} exists={p.exists()}", flush=True)
 
         if not p.exists():
             return None
 
         obj = joblib.load(p)
-        predictor = _find_predictor_in_obj(obj)
-
-        if predictor is None:
-            print("[router] no predictor found in loaded object:", type(obj), flush=True)
-            return None
-
-        print("[router] loaded predictor:", type(predictor), flush=True)
-        return predictor
+        if isinstance(obj, dict):
+            print("[router] bundle keys:", list(obj.keys()), flush=True)
+        else:
+            print("[router] loaded object:", type(obj), flush=True)
+        return obj
 
     except Exception as e:
         print(f"[router] Failed to load line_candidate_selector.pkl: {e}", flush=True)
 
     return None
+
+
+@lru_cache(maxsize=1)
+def load_router_model():
+    bundle = load_router_bundle()
+    return _bundle_get_predictor(bundle)
 
 
 @lru_cache(maxsize=1)
@@ -913,10 +1197,16 @@ def load_blank_model():
     try:
         import joblib
         p = MODEL_DIR / "blank_classifier.pkl"
+        print(f"[blank] loading: {p} exists={p.exists()}", flush=True)
         if p.exists():
-            return joblib.load(p)
+            obj = joblib.load(p)
+            if isinstance(obj, dict):
+                print("[blank] bundle keys:", list(obj.keys()), flush=True)
+            else:
+                print("[blank] loaded object:", type(obj), flush=True)
+            return obj
     except Exception as e:
-        print(f"[router] Failed to load blank_classifier.pkl: {e}")
+        print(f"[router] Failed to load blank_classifier.pkl: {e}", flush=True)
 
     return None
 
