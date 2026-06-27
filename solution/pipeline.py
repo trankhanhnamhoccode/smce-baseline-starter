@@ -170,7 +170,9 @@ def _parse_paddle_result(result: Any, min_conf: float) -> list[dict[str, Any]]:
         score_f = _safe_float(score, 1.0)
         if score_f < min_conf:
             return
-
+        if is_junk_ocr_line(text, score_f):
+            return
+        
         x0, y0 = 0.0, 0.0
         try:
             pts = np.asarray(box, dtype=float)
@@ -235,33 +237,65 @@ def _parse_paddle_result(result: Any, min_conf: float) -> list[dict[str, Any]]:
         dedup.append(it)
     return dedup
 
+import re
 
-def ocr_variant(img: Image.Image, variant: str, min_conf: float) -> list[dict[str, Any]]:
-    vimg = make_variant(img, variant)
-    reader = get_ocr_reader()
-    arr = np.array(vimg)
+VIET_CHARS = "a-zA-ZÀ-ỹĐđ"
+JUNK_TOKEN_RE = re.compile(rf"^[{VIET_CHARS}0-9]+$")
 
-    try:
-        result = reader.ocr(arr, cls=True)
-    except TypeError:
-        result = reader.ocr(arr)
-    except Exception:
-        # Some PaddleOCR builds are more stable with a file path.
-        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
-            tmp = f.name
-        try:
-            vimg.save(tmp)
-            try:
-                result = reader.ocr(tmp, cls=True)
-            except TypeError:
-                result = reader.ocr(tmp)
-        finally:
-            try:
-                os.remove(tmp)
-            except Exception:
-                pass
 
-    return _parse_paddle_result(result, min_conf=min_conf)
+def is_junk_ocr_line(text: str, score: float | None = None) -> bool:
+    s = str(text or "").strip()
+    if not s:
+        return True
+
+    # Very low confidence lines are usually noise.
+    if score is not None and score < 0.45:
+        return True
+
+    # Remove lines that are mostly punctuation/symbols.
+    alnum = re.findall(rf"[{VIET_CHARS}0-9]", s)
+    if len(alnum) < 2:
+        return True
+
+    tokens = re.findall(rf"[{VIET_CHARS}0-9]+", s)
+    if not tokens:
+        return True
+
+    # Too many ultra-short uppercase fragments: "F FE BA D C HY OOO..."
+    short_tokens = [t for t in tokens if len(t) <= 2]
+    upper_tokens = [t for t in tokens if t.isupper() and len(t) <= 3]
+
+    if len(tokens) >= 6:
+        short_ratio = len(short_tokens) / max(1, len(tokens))
+        upper_ratio = len(upper_tokens) / max(1, len(tokens))
+
+        if short_ratio >= 0.55 and upper_ratio >= 0.45:
+            return True
+
+    # Long line with almost no Vietnamese-looking words is suspicious.
+    meaningful = [
+        t for t in tokens
+        if len(t) >= 4 or re.search(r"[àáảãạăằắẳẵặâầấẩẫậèéẻẽẹêềếểễệìíỉĩịòóỏõọôồốổỗộơờớởỡợùúủũụưừứửữựỳýỷỹỵđĐ]", t)
+    ]
+
+    if len(tokens) >= 8 and len(meaningful) <= 2:
+        return True
+
+    return False
+
+def clean_ocr_lines(lines):
+    cleaned = []
+    for item in lines:
+        text = item.get("text", "")
+        score = item.get("score", None)
+
+        if is_junk_ocr_line(text, score):
+            continue
+
+        cleaned.append(item)
+
+    return cleaned
+
 
 
 def join_lines(lines: list[dict[str, Any]] | list[str]) -> str:
