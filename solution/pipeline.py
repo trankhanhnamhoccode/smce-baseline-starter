@@ -452,23 +452,55 @@ def load_blank_model():
 
 
 def select_ocr_candidate(cand_df: pd.DataFrame, var_df: pd.DataFrame) -> str:
+    print("[router] select_ocr_candidate called", flush=True)
+
     if cand_df.empty:
+        print("[router] cand_df empty", flush=True)
         return ""
 
+    print(
+        "[router] cand_df:",
+        len(cand_df),
+        "types:",
+        cand_df["candidate_type"].value_counts().to_dict()
+        if "candidate_type" in cand_df.columns
+        else "no_candidate_type",
+        flush=True,
+    )
+
     model = load_router_model()
+    print("[router] model loaded:", model is not None, "type:", type(model), flush=True)
+
     scored = cand_df.copy()
 
     if model is not None:
         try:
             scored["pred_btc_cer"] = model.predict(scored)
-            scored = scored.sort_values(["pred_btc_cer", "junk_ratio", "text_len"], ascending=[True, True, False])
+            scored = scored.sort_values(
+                ["pred_btc_cer", "junk_ratio", "text_len"],
+                ascending=[True, True, False],
+            )
+
             best = scored.iloc[0]
-            print("[router] selected:", best.get("candidate_name", ""), best.get("candidate_type", ""), best.get("source_variant", ""))
+            print(
+                "[router] selected:",
+                best.get("candidate_name", ""),
+                "| type:",
+                best.get("candidate_type", ""),
+                "| variant:",
+                best.get("source_variant", ""),
+                "| pred:",
+                best.get("pred_btc_cer", ""),
+                flush=True,
+            )
+
             selected = _clean(best.get("ocr_text", ""))
-        except Exception:
-            # Fallback when sklearn/model version mismatch occurs.
+
+        except Exception as e:
+            print("[router] model failed:", repr(e), flush=True)
             selected = ""
     else:
+        print("[router] no model, using fallback rank_score", flush=True)
         selected = ""
 
     if not selected:
@@ -479,14 +511,29 @@ def select_ocr_candidate(cand_df: pd.DataFrame, var_df: pd.DataFrame) -> str:
             - fallback["junk_ratio"].astype(float).fillna(0) * 3.0
         )
         fallback = fallback.sort_values(["rank_score", "text_len"], ascending=[False, False])
-        selected = _clean(fallback.iloc[0].get("ocr_text", ""))
+
+        best = fallback.iloc[0]
+        print(
+            "[router] fallback selected:",
+            best.get("candidate_name", ""),
+            "| type:",
+            best.get("candidate_type", ""),
+            "| variant:",
+            best.get("source_variant", ""),
+            "| rank:",
+            best.get("rank_score", ""),
+            flush=True,
+        )
+
+        selected = _clean(best.get("ocr_text", ""))
 
     if USE_BLANK_GATE:
         try:
             if should_blank_with_model(cand_df, var_df):
+                print("[router] blank gate applied", flush=True)
                 return ""
-        except Exception:
-            pass
+        except Exception as e:
+            print("[router] blank gate failed:", repr(e), flush=True)
 
     return selected
 
