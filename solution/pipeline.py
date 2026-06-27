@@ -462,7 +462,9 @@ def select_ocr_candidate(cand_df: pd.DataFrame, var_df: pd.DataFrame) -> str:
         try:
             scored["pred_btc_cer"] = model.predict(scored)
             scored = scored.sort_values(["pred_btc_cer", "junk_ratio", "text_len"], ascending=[True, True, False])
-            selected = _clean(scored.iloc[0].get("ocr_text", ""))
+            best = scored.iloc[0]
+            print("[router] selected:", best.get("candidate_name", ""), best.get("candidate_type", ""), best.get("source_variant", ""))
+            selected = _clean(best.get("ocr_text", ""))
         except Exception:
             # Fallback when sklearn/model version mismatch occurs.
             selected = ""
