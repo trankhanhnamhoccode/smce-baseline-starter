@@ -17,8 +17,8 @@ from PIL import Image, ImageEnhance, ImageFilter
 # Force CPU mode before Paddle/PaddleOCR import.
 os.environ.setdefault("CUDA_VISIBLE_DEVICES", "")
 os.environ.setdefault("FLAGS_use_cuda", "0")
-
 ROOT = Path(__file__).resolve().parents[1]
+MODEL_DIR = ROOT / "models" / "ocr_router"
 SRC = ROOT / "src"
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
