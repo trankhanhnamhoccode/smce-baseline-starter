@@ -637,10 +637,6 @@ import numpy as _demo_np
 # Full 8-variant mode is too slow on CPU.
 VARIANTS = [
     "raw",
-]
-
-FULL_VARIANTS = [
-    "raw",
     "center_70_resize_960",
     "bottom_60_resize_960",
     "bottom_50_resize_960",
