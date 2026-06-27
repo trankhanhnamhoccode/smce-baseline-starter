@@ -124,6 +124,22 @@ def make_variant(img: Image.Image, variant: str) -> Image.Image:
 
 @lru_cache(maxsize=1)
 def get_ocr_reader():
+    """
+    Stable Kaggle CPU setup restored from the working CPU notebook.
+
+    Important details:
+    - PaddleOCR 3.x / PP-OCRv6
+    - CPU device
+    - engine="paddle"
+    - enable_mkldnn=False
+    - call predict(np.array(img)), not predict(path)
+    """
+    _demo_os.environ.setdefault("CUDA_VISIBLE_DEVICES", "")
+    _demo_os.environ.setdefault("FLAGS_use_cuda", "0")
+    _demo_os.environ.setdefault("FLAGS_use_mkldnn", "0")
+    _demo_os.environ.setdefault("FLAGS_use_onednn", "0")
+    _demo_os.environ.setdefault("FLAGS_enable_pir_api", "0")
+
     try:
         import paddle
         paddle.set_device("cpu")
@@ -132,24 +148,16 @@ def get_ocr_reader():
 
     from paddleocr import PaddleOCR
 
-    configs = [
-        dict(use_angle_cls=True, lang="vi", use_gpu=False, show_log=False),
-        dict(use_angle_cls=True, lang="vi", use_gpu=False),
-        dict(lang="vi", use_gpu=False),
-        dict(lang="vi"),
-        dict(use_angle_cls=True, lang="en", use_gpu=False, show_log=False),
-        dict(use_angle_cls=True, lang="en", use_gpu=False),
-        dict(lang="en", use_gpu=False),
-        dict(lang="en"),
-        dict(),
-    ]
-    last_error = None
-    for cfg in configs:
-        try:
-            return PaddleOCR(**cfg)
-        except Exception as e:
-            last_error = e
-    raise RuntimeError(f"Cannot initialize PaddleOCR CPU reader: {last_error}")
+    return PaddleOCR(
+        lang="vi",
+        device="cpu",
+        ocr_version="PP-OCRv6",
+        use_doc_orientation_classify=False,
+        use_doc_unwarping=False,
+        use_textline_orientation=False,
+        enable_mkldnn=False,
+        engine="paddle",
+    )
 
 
 def _parse_paddle_result(result: Any, min_conf: float) -> list[dict[str, Any]]:
