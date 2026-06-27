@@ -1022,11 +1022,33 @@ def predict_from_image(img: Image.Image, min_conf: float = DEFAULT_MIN_CONF, *, 
     t0 = time.perf_counter()
 
     t_ocr = time.perf_counter()
-    ocr_text, evidence_lines, cand_df, var_df = run_multivariant_ocr(img.convert("RGB"), min_conf=min_conf)
+    try:
+        ocr_text, evidence_lines, cand_df, var_df = run_multivariant_ocr(
+            img.convert("RGB"),
+            min_conf=min_conf,
+        )
+    except Exception as e:
+        print("[predict] OCR failed:", repr(e), flush=True)
+        ocr_text, evidence_lines = "", []
+        cand_df, var_df = pd.DataFrame(), pd.DataFrame()
+
     ocr_ms = (time.perf_counter() - t_ocr) * 1000
 
     t_extract = time.perf_counter()
-    brand_name, product_name, audit = extract_brand_product_from_ocr(ocr_text, evidence_lines)
+    try:
+        brand_name, product_name, audit = extract_brand_product_from_ocr(
+            ocr_text,
+            evidence_lines,
+        )
+    except Exception as e:
+        print("[predict] extractor failed:", repr(e), flush=True)
+        brand_name = ""
+        product_name = ""
+        audit = {
+            "ocr_text": ocr_text,
+            "extractor_error": repr(e),
+        }
+
     extract_ms = (time.perf_counter() - t_extract) * 1000
 
     result: dict[str, Any] = {
@@ -1034,7 +1056,20 @@ def predict_from_image(img: Image.Image, min_conf: float = DEFAULT_MIN_CONF, *, 
         "brand_name": brand_name,
         "product_name": product_name,
     }
+
     if include_timing:
+        try:
+            router_loaded = load_router_model() is not None
+        except Exception as e:
+            print("[predict] router audit failed:", repr(e), flush=True)
+            router_loaded = False
+
+        try:
+            blank_loaded = load_blank_model() is not None
+        except Exception as e:
+            print("[predict] blank audit failed:", repr(e), flush=True)
+            blank_loaded = False
+
         result["timing_ms"] = {
             "ocr": round(ocr_ms, 1),
             "extract": round(extract_ms, 1),
@@ -1044,10 +1079,11 @@ def predict_from_image(img: Image.Image, min_conf: float = DEFAULT_MIN_CONF, *, 
             **audit,
             "ocr_variants": int(len(var_df)),
             "ocr_candidates": int(len(cand_df)),
-            "router_model_loaded": load_router_model() is not None,
-            "blank_model_loaded": load_blank_model() is not None,
+            "router_model_loaded": router_loaded,
+            "blank_model_loaded": blank_loaded,
             "blank_gate_enabled": USE_BLANK_GATE,
         }
+
     return result
 
 
