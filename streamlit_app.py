@@ -428,3 +428,35 @@ with tab_live:
 
 with tab_about:
     _render_about_tab()
+
+import streamlit as st
+
+with st.expander("PaddleOCR debug"):
+    try:
+        import sys, platform
+        st.write("Python:", sys.version)
+        st.write("Platform:", platform.platform())
+        st.write("Machine:", platform.machine())
+
+        import paddle
+        st.write("paddle:", paddle.__version__)
+        paddle.set_device("cpu")
+        st.success("paddle import OK")
+
+        import paddleocr
+        st.write("paddleocr:", getattr(paddleocr, "__version__", "unknown"))
+        st.success("paddleocr import OK")
+
+        from paddleocr import PaddleOCR
+        ocr = PaddleOCR(
+            lang="vi",
+            device="cpu",
+            ocr_version="PP-OCRv6",
+            use_doc_orientation_classify=False,
+            use_doc_unwarping=False,
+            use_textline_orientation=False,
+        )
+        st.success("PaddleOCR init OK")
+
+    except Exception as e:
+        st.exception(e)
