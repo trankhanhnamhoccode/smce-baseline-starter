@@ -7,26 +7,34 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent
 
 
-# Team identity (required after fork)
+# Team identity
 
-TEAM_NAME = "Team ABC"
-TEAM_MEMBERS = "[Member 1], [Member 2], [Member 3]"
-GITHUB_REPO = "https://github.com/your-team/ura-hackathon-team-abc"
-OTHER_RESOURCE = "https://example.com/other-resource"
-STREAMLIT_APP_URL = ""  # e.g. "https://ura-team-abc.streamlit.app" after deploy
+TEAM_NAME = "Team 1 - Ngũ Long Công Tửu"
+TEAM_MEMBERS = (
+    "Trần Khánh Nam, "
+    "Đặng Võ Minh Nhựt, "
+    "Trương Quang Khải, "
+    "Nguyễn Thiện Nhân, "
+    "Nguyễn Hoàng"
+)
+
+GITHUB_REPO = "https://github.com/trankhanhnamhoccode/smce-baseline-starter"
+OTHER_RESOURCE = "https://www.kaggle.com/competitions/the-2nd-ura-hackathon/overview"
+STREAMLIT_APP_URL = "https://team1ngulongcongtuu.streamlit.app/"
 
 
 # Streamlit page copy
 
 SUBTITLE = (
-    "OCR & Product Name Extraction from Social Media Images "
-    "by HCMUT URA Research Group"
+    "CPU-friendly OCR, Brand Extraction & Product Name Extraction "
+    "from Vietnamese Social Media Images"
 )
+
 PAGE_TITLE = f"The 2nd URA Hackathon - {TEAM_NAME}"
 BROWSER_TITLE = PAGE_TITLE
 
 
-# Branding assets (replace files under assets/ if needed)
+# Branding assets
 
 ASSETS_DIR = REPO_ROOT / "assets"
 FAVICON = ASSETS_DIR / "kaggle_144224_logos_thumb76_76.png"
@@ -43,20 +51,31 @@ THEME_TEXT = "#1A2B4A"
 THEME_MUTED = "#5C6B8A"
 
 
-# Default inference settings (override inside solution/pipeline.py if needed)
+# Default inference settings
 
 DEFAULT_MIN_CONF = 0.35
 
 
-# Model footprint (edit when you change OCR / models — benchmark layer reads this)
+# Model footprint / demo profile
+# Keep this in sync with solution/pipeline.py.
 
 MODEL_PROFILE: dict[str, str | float | None] = {
-    "pipeline": "EasyOCR (vi+en) + regex brands + sklearn product head",
+    "pipeline": (
+        "PaddleOCR PP-OCRv6 CPU OCR "
+        "+ Vietnamese text cleanup "
+        "+ brand/product rules "
+        "+ sklearn/router post-processing"
+    ),
     "runtime_device": "CPU",
-    "product_head_mb": None,  # auto-estimate when None
-    "ocr_backend_note": "EasyOCR weights ~200 MB (downloaded once, not in repo)",
+    "product_head_mb": None,
+    "ocr_backend_note": (
+        "PaddleOCR 3.x with PP-OCRv6, lang='vi', device='cpu', "
+        "engine='paddle'. The live demo uses raw variant only for stable "
+        "CPU latency."
+    ),
     "lightweight_notes": (
-        "Baseline is CPU-friendly; product head is a few MB. "
-        "Swap OCR for a lighter stack to improve latency on Cloud."
+        "Optimized for Streamlit/Kaggle CPU live demo. "
+        "Full 8-variant OCR is disabled in the demo path because it is much "
+        "slower on CPU; the current runtime uses VARIANTS = ['raw']."
     ),
 }
