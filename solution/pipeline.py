@@ -853,17 +853,55 @@ def _ensure_router_models_for_cloud():
         print(f"[models] Warning: could not auto-download router models: {e}")
 
 
+def _find_predictor_in_obj(obj):
+    """Return the first object that has .predict(), including inside dict bundles."""
+    if hasattr(obj, "predict"):
+        return obj
+
+    if isinstance(obj, dict):
+        print("[router] bundle keys:", list(obj.keys()), flush=True)
+
+        # Common keys first
+        for key in ["model", "router", "estimator", "selector", "regressor", "clf", "pipeline"]:
+            val = obj.get(key)
+            if hasattr(val, "predict"):
+                print(f"[router] using bundle['{key}']", flush=True)
+                return val
+
+        # Fallback: scan all values
+        for key, val in obj.items():
+            if hasattr(val, "predict"):
+                print(f"[router] using bundle['{key}']", flush=True)
+                return val
+
+    return None
+
+
 @lru_cache(maxsize=1)
 def load_router_model():
     _ensure_router_models_for_cloud()
 
     try:
         import joblib
+
         p = MODEL_DIR / "line_candidate_selector.pkl"
-        if p.exists():
-            return joblib.load(p)
+        print(f"[router] loading: {p} exists={p.exists()}", flush=True)
+
+        if not p.exists():
+            return None
+
+        obj = joblib.load(p)
+        predictor = _find_predictor_in_obj(obj)
+
+        if predictor is None:
+            print("[router] no predictor found in loaded object:", type(obj), flush=True)
+            return None
+
+        print("[router] loaded predictor:", type(predictor), flush=True)
+        return predictor
+
     except Exception as e:
-        print(f"[router] Failed to load line_candidate_selector.pkl: {e}")
+        print(f"[router] Failed to load line_candidate_selector.pkl: {e}", flush=True)
 
     return None
 
